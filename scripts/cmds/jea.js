@@ -7,15 +7,37 @@ let simEnabled = false;
 const cooldown = new Map();
 
 // ======================
+// IMAGE DETECTOR (FIXED)
+// ======================
+function getImageUrlFromEvent(event) {
+  // reply to image
+  if (event.messageReply?.attachments?.length) {
+    const img = event.messageReply.attachments.find(
+      att => att.type === "photo" || att.type === "animated_image"
+    );
+    if (img?.url) return img.url;
+  }
+
+  // direct image (no reply)
+  if (event.attachments?.length) {
+    const img = event.attachments.find(
+      att => att.type === "photo" || att.type === "animated_image"
+    );
+    if (img?.url) return img.url;
+  }
+
+  return null;
+}
+
+// ======================
 // AI FUNCTION
 // ======================
 async function getSimReply(api, event, prompt) {
   try {
     const uid = event.senderID;
     let name = "User";
-    let imageUrl = null;
 
-    // ✅ SAFE NAME FETCH
+    // SAFE name fetch
     try {
       const threadInfo = await api.getThreadInfo(event.threadID);
       const user = threadInfo.userInfo?.find(u => u.id === uid);
@@ -33,26 +55,20 @@ async function getSimReply(api, event, prompt) {
       name = `User_${String(uid).slice(-4)}`;
     }
 
-    // ✅ SAFE IMAGE DETECTION (same as ai command)
-    if (event.messageReply?.attachments?.length) {
-      const img = event.messageReply.attachments.find(att =>
-        att.type === "photo" || att.type === "animated_image"
-      );
+    const imageUrl = getImageUrlFromEvent(event);
 
-      if (img?.url) imageUrl = img.url;
-    }
-
-    const apiBase = "https://norch-project.gleeze.com/api/jea";
-
-    const res = await axios.get(apiBase, {
-      params: {
-        prompt,
-        uid,
-        name,
-        imageUrl: imageUrl || undefined
-      },
-      timeout: 15000
-    });
+    const res = await axios.get(
+      "https://norch-project.gleeze.com/api/jea",
+      {
+        params: {
+          prompt,
+          uid,
+          name,
+          imageUrl: imageUrl || undefined
+        },
+        timeout: 20000
+      }
+    );
 
     if (!res.data?.reply) return null;
 
@@ -70,11 +86,11 @@ async function getSimReply(api, event, prompt) {
 module.exports = {
   config: {
     name: "jea",
-    version: "3.2.0",
-    author: "April Manalo (image support)",
+    version: "4.0.0",
+    author: "April Manalo (FULL IMAGE FIX)",
     role: 0,
     category: "ai",
-    guide: "-jea on | off | <message>"
+    guide: "-jea on | off | <message> | (reply to image)"
   },
 
   // ======================
@@ -103,17 +119,23 @@ module.exports = {
       }
 
       const prompt = args.join(" ").trim();
+      const imageUrl = getImageUrlFromEvent(event);
 
-      // ❌ no text + no image
-      if (!prompt && !event.messageReply?.attachments?.length) {
+      // ❌ nothing provided
+      if (!prompt && !imageUrl) {
         return api.sendMessage(
-          "⚠️ Usage:\n-jea on\n-jea off\n-jea <message>\n(or reply to an image)",
+          "⚠️ Usage:\n-jea <message>\n(or reply to an image)",
           event.threadID,
           event.messageID
         );
       }
 
-      const reply = await getSimReply(api, event, prompt || "Tignan mo to");
+      const reply = await getSimReply(
+        api,
+        event,
+        prompt || "Tignan mo to"
+      );
+
       if (!reply) {
         return api.sendMessage(
           "⚠️ Jea is unavailable.",
@@ -134,24 +156,35 @@ module.exports = {
   },
 
   // ======================
-  // AUTO CHAT
+  // AUTO CHAT (FIXED)
   // ======================
   onChat: async function ({ api, event }) {
     try {
       if (!simEnabled) return;
       if (event.senderID === api.getCurrentUserID()) return;
-      if (!event.body || typeof event.body !== "string") return;
 
-      const body = event.body.trim();
+      const body = event.body?.trim() || "";
+      const imageUrl = getImageUrlFromEvent(event);
 
+      // ❌ no text AND no image
+      if (!body && !imageUrl) return;
+
+      // ignore commands
       if (body.startsWith("-")) return;
-      if (body.length < 2) return;
 
+      // cooldown (5 sec)
       const now = Date.now();
       if (cooldown.get(event.senderID) > now - 5000) return;
       cooldown.set(event.senderID, now);
 
-      const reply = await getSimReply(api, event, body);
+      console.log("[JEA AUTO]", { body, imageUrl });
+
+      const reply = await getSimReply(
+        api,
+        event,
+        body || "Tignan mo to"
+      );
+
       if (!reply) return;
 
       await api.sendMessage(
